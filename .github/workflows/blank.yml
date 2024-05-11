@@ -1,0 +1,159 @@
+name: Github Action Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      object_code:
+        description: 'Select OBJECT_CODE'
+        required: true
+        default: 'None' # Set default value if needed
+        options: ['None', 'ALL', 'A43', 'A215', 'A15', 'A836']
+      workflow_type:
+        description: 'Select WORKFLOW type'
+        required: true
+        default: 'ICD' # Set default value if needed
+        options: ['ICD', 'Harness']
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    #- name: Checkout
+    #uses: actions/checkout@v3
+      
+    - name: Set up JDK 17
+      uses: actions/setup-java@v2
+      with:
+        java-version: '17'
+        distribution: 'adopt'  
+      
+    - name: Create Input Folder Structure
+      run: |
+        # Create the directories if they don't exist
+        mkdir -p "${{ github.workspace }}/Input"
+        mkdir -p "${{ github.workspace }}/Output"
+        mkdir -p "${{ github.workspace }}/Logs"
+      
+    - name: Checkout Inputs repository
+      uses: actions/checkout@v2
+      with:
+        repository: gitlab.kpit.com/eio-configuration-tool/eio-configurator-inputs.git
+        ref: SPRINT_TEN_DEVELOPMENT
+
+    - name: Create directories and move files
+      run: |
+        mkdir -p ${{ github.workspace }}/Inputs/CIR2EIOC_Input
+        mkdir -p ${{ github.workspace }}/Inputs/Terminator_Object_Code_Input
+        mkdir -p ${{ github.workspace }}/Inputs/UpcFnaData
+        mkdir -p ${{ github.workspace }}/Inputs/Gap\ Data
+        
+        mv CIR2EIOC_Test1.csv "${{ github.workspace }}/Inputs/CIR2EIOC_Input"
+        mv object_codes_iec_gmw_011724-2037-Modified.csv "${{ github.workspace }}/Inputs/Terminator_Object_Code_Input"
+        mv OC_OCI_UPC_FNA_VPPS_REF_MAP_022824-1707.csv "${{ github.workspace }}/Inputs/UpcFnaData"
+        mv Gap_Data_and_unique_RPOs.xlsx "${{ github.workspace }}/Inputs/Gap Data"
+      
+    - name: Extract Zip File
+      run: |
+        # Check if the zip file contains the string "[Pinout Information]"
+        if unzip -p "${{ github.workspace }}/$ICD_ZIP" | grep -q "\[Pinout Information\]"; then
+          unzip -q "${{ github.workspace }}/$ICD_ZIP" -d "${{ github.workspace }}/eSCI_IT_Tool_Export"
+          echo "********** Zip file extracted successfully **********"
+        else
+          mkdir -p "${{ github.workspace }}/eSCI_IT_Tool_Export"
+          cp "${{ github.workspace }}/$ICD_ZIP" "${{ github.workspace }}/eSCI_IT_Tool_Export/${{ env.ICD_ZIP_FILENAME }}"
+          echo "********** File ${{ env.ICD_ZIP_FILENAME }} copied to eSCI IT Tool Export **********"
+        fi
+      
+    # Additional steps for populating Input folder go here
+
+    - name: Validate BuildXML
+      run: |
+        echo 'Validating BuildXML...'
+        if [ -f "path/to/BuildXML" ]; then
+          if grep -q "CalSetName" path/to/BuildXML; then
+            echo "BuildXML file is valid."
+          else
+            echo "Error: BuildXML is not a valid XML file or does not contain 'CalSetName'. Aborting the workflow. Please select the correct XML file."
+            exit 1
+          fi
+        else
+          echo "Error: BuildXML file does not exist. Aborting the workflow. Please select the correct XML file."
+          exit 1
+        fi
+
+    - name: Validate BuildTSV
+      run: |
+        echo 'Validating BuildTSV...'
+        if [ -f "path/to/BuildTSV" ]; then
+          echo "BuildTSV file is valid. Proceeding with the workflow."
+        else
+          echo "Error: BuildTSV file does not exist. Aborting the workflow. Please select the correct TSV file."
+          exit 1
+        fi
+
+    - name: Validate GMLogic
+      run: |
+        echo 'Validating GMLogic file...'
+        if [ -f "path/to/GMLogic" ]; then
+          if [ -s "path/to/GMLogic" ]; then
+            echo "GMLogic file is not empty. Proceeding with the workflow."
+          else
+            echo "Error: GMLogic file is empty. Aborting the workflow. Please select the correct GMLogic file."
+            exit 1
+          fi
+        else
+          echo "Error: GMLogic file does not exist. Aborting the workflow. Please select the correct GMLogic file."
+          exit 1
+        fi
+
+    - name: Generate Executable
+      run: |
+        mvn clean install -DskipTests -U
+
+    - name: Generate calibration and logfiles
+      run: |
+        # Check out the repository
+        git clone https://github.com/yourusername/yourrepository.git
+        cd yourrepository
+
+        # Copy the JAR file to the Inputs directory
+        cp target/eio-configurator-1.0.jar Inputs/
+
+        # Execute the Java command based on parameters
+        if [ "$OBJECT_CODE" = "None" ]; then
+          echo "ERROR: No OBJECT_CODE selected"
+          exit 1
+        elif [ "$OBJECT_CODE" = "A43" ]; then
+          java -jar Inputs/eio-configurator-1.0.jar $OBJECT_CODE $WORKFLOW $CHILD_OBJECT_CODE
+        elif [ "$OBJECT_CODE" = "ALL" ]; then
+          java -jar Inputs/eio-configurator-1.0.jar A15,A43,A215,A836 $WORKFLOW
+        else
+          java -jar Inputs/eio-configurator-1.0.jar $OBJECT_CODE $WORKFLOW
+        fi
+
+    - name: Move generated files to Output directory
+      run: |
+        # Move files to the Output directory
+        mv *Mapping.xlsx "${{ github.workspace }}/Output"
+        mv *.log "${{ github.workspace }}/Logs"
+        if [ -f "Circuit_Connection_Data.xlsx" ]; then mv Circuit_Connection_Data.xlsx "${{ github.workspace }}/Output"; fi
+        if [ -f "Terminator_UPC_FNA_DATA.xlsx" ]; then mv Terminator_UPC_FNA_DATA.xlsx "${{ github.workspace }}/Output"; fi
+        if [ -n "$(find . -maxdepth 1 -type f -name '*_Harness_Calibration_File*')" ]; then mv *_Harness_Calibration_File* "${{ github.workspace }}/Output"; fi
+        if [ -n "$(find . -maxdepth 1 -type f -name '*_Calibration_Binaries_File*')" ]; then mv *_Calibration_Binaries_File* "${{ github.workspace }}/Output"; fi
+        if [ -d "ICD_CALBLOCK_CRETA_FILES" ]; then mv ICD_CALBLOCK_CRETA_FILES "${{ github.workspace }}/Output"; fi
+        if [ -d "ICD_MODULE_CONFIGS_CRETA_FILES" ]; then mv ICD_MODULE_CONFIGS_CRETA_FILES "${{ github.workspace }}/Output"; fi
+        if [ -n "$(find . -maxdepth 1 -type f -name '*_ECM_File.csv')" ]; then mv *_ECM_File.csv "${{ github.workspace }}/Output"; fi
+        if [ -n "$(find . -maxdepth 1 -type f -name '*_MODULE_CONFIG_CSV_FILE*')" ]; then mv *_MODULE_CONFIG_CSV_FILE* "${{ github.workspace }}/Output"; fi
+        if [ -n "$(find . -maxdepth 1 -type f -name '*_HRN_Calblock.csv')" ]; then mv *_HRN_Calblock.csv "${{ github.workspace }}/Output"; fi
+        if [ -n "$(find . -maxdepth 1 -type f -name '*_MODULE_CONFIG.*')" ]; then mv *_MODULE_CONFIG.* "${{ github.workspace }}/Output"; fi
+        if [ -d "HARNESS_MODULE_CALIBRATION_CRETA_FILES" ]; then mv HARNESS_MODULE_CALIBRATION_CRETA_FILES "${{ github.workspace }}/Output"; fi
+        shell: bash
+
+        # Clean up JAR file
+        rm Inputs/eio-configurator-1.0.jar
+
+    - name: Zipping Files
+      run: |
+        # Create a zip file containing Inputs, Output, and Logs directories
+        zip -r EIO_Config_Tool_Artifacts.zip Inputs Output Logs
+        echo "********** Artifact zip created...! **********"
