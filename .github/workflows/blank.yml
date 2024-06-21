@@ -75,12 +75,12 @@ jobs:
           java-version: '17'
           distribution: 'adopt' 
 	  
-    - name: Build
-      run: |
-        mvn clean install -DskipTests -U
+      - name: Build
+        run: |
+          mvn clean install -DskipTests -U
 
-    - name: Generate calibration and logfiles
-      run: |
+      - name: Generate calibration and logfiles
+        run: |
 
         # Copy the JAR file to the Inputs directory
         cp target/eio-configurator-1.0.jar Inputs/
